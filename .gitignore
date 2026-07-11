@@ -13,3 +13,6 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# CLI tool config (created by `python -m elm327_obdii`)
+.elm327_obdii_config.json

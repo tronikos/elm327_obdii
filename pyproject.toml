@@ -1,6 +1,6 @@
 [project]
 name = "elm327_obdii"
-version = "0.0.1"
+version = "0.0.2"
 license = {text = "Apache-2.0"}
 authors = [
     { name="tronikos", email="tronikos@gmail.com" },
@@ -22,6 +22,7 @@ test = [
     "pytest-asyncio",
     "pyyaml",
 ]
+cli = []
 
 [project.urls]
 "Homepage" = "https://github.com/tronikos/elm327_obdii"
@@ -147,6 +148,7 @@ fixture-parentheses = false
 
 [tool.ruff.lint.per-file-ignores]
 "src/elm327_obdii/profiles/*" = ["TID252"]
+"src/elm327_obdii/__main__.py" = ["T20"]
 "tests/*" = ["TID252", "S101", "SLF001", "PTH"]
 "src/*" = ["PTH"]
 

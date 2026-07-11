@@ -69,9 +69,9 @@ def probe_adapter(
             timeout=timeout,
         )
         conn = Connection(transport)
+        resp = conn.query(Command(Mode.AT, "RV"))
         final_write = transport.config.get("uuid_write", final_write)
         final_read = transport.config.get("uuid_read", final_read)
-        resp = conn.query(Command(Mode.AT, "RV"))
 
         try:
             scanned = scan_supported_pids(conn)
