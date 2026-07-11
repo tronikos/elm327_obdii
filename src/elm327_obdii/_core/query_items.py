@@ -111,6 +111,16 @@ class CustomQueryItem:
         if b"BUFFER FULL" in raw:
             _LOGGER.debug("Custom query %s: BUFFER FULL", self.pid.id)
             return None
+        if self.context.filter:
+            expected = self.context.filter.upper().encode()
+            if expected not in raw:
+                _LOGGER.debug(
+                    "Custom query %s: response from wrong ECU (expected %s, got %s)",
+                    self.pid.id,
+                    self.context.filter,
+                    raw.decode(errors="ignore").strip(),
+                )
+                return None
         clean = extract_clean_payload(raw, self.pid.mode)
         _LOGGER.debug(
             "Custom query %s: raw=%s, clean=%s",
@@ -119,6 +129,14 @@ class CustomQueryItem:
             [f"{b:02X}" for b in clean] if clean else None,
         )
         if not clean:
+            return None
+        if clean[0] == 0x7F:
+            nrc = clean[2] if len(clean) > 2 else 0
+            _LOGGER.debug(
+                "Custom query %s: negative response (NRC=0x%02X), skipping",
+                self.pid.id,
+                nrc,
+            )
             return None
         return self.evaluator(clean)
 

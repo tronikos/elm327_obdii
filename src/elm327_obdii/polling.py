@@ -444,7 +444,8 @@ def _send_at(transport: TransportBase, command: str) -> None:
     """Write a single AT command + CR, then drain the response."""
     try:
         transport.write_bytes(command.encode() + b"\r")
-        transport.read_bytes()
+        resp = transport.read_bytes()
+        _LOGGER.debug("AT %s -> %s", command, resp.decode(errors="ignore").strip())
     except (OSError, TimeoutError, TransportError) as err:
         _LOGGER.debug("AT command %r failed: %s", command, err)
 
