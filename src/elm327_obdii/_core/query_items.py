@@ -10,11 +10,14 @@ default (header=None) context.
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+import logging
 from typing import Any, Protocol
 
 from .can_context import CanContext
 from .elm327_parsing import extract_clean_payload
 from .schema import CustomPid
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class QueryItem(Protocol):
@@ -61,7 +64,15 @@ class StandardQueryItem:
         """Query the standard PID and return the resolver's typed value."""
         resp = connection.query(self.command)
         if resp is None:
+            _LOGGER.debug("Standard query %s: no response", self.command_name)
             return None
+        raw = getattr(resp, "raw", None)
+        _LOGGER.debug(
+            "Standard query %s: raw=%s, value=%s",
+            self.command_name,
+            raw.decode(errors="ignore") if raw else None,
+            resp.value,
+        )
         if _is_buffer_full(resp):
             return None
         return resp.value
@@ -91,13 +102,22 @@ class CustomQueryItem:
         """Query the custom PID, build the clean payload, evaluate the fmt."""
         resp = connection.query(self.command)
         if resp is None:
+            _LOGGER.debug("Custom query %s: no response", self.pid.id)
             return None
         raw = getattr(resp, "raw", None)
         if not raw:
+            _LOGGER.debug("Custom query %s: empty raw response", self.pid.id)
             return None
         if b"BUFFER FULL" in raw:
+            _LOGGER.debug("Custom query %s: BUFFER FULL", self.pid.id)
             return None
         clean = extract_clean_payload(raw, self.pid.mode)
+        _LOGGER.debug(
+            "Custom query %s: raw=%s, clean=%s",
+            self.pid.id,
+            raw.decode(errors="ignore"),
+            [f"{b:02X}" for b in clean] if clean else None,
+        )
         if not clean:
             return None
         return self.evaluator(clean)
