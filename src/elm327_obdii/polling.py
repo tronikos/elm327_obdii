@@ -103,6 +103,7 @@ class Poller:
         self._grace_start: float | None = None
         self._api: Connection | None = None
         self._lock = threading.Lock()
+        self._unsupported_at_commands: set[str] = set()
 
     @property
     def state(self) -> PollingState:
@@ -185,6 +186,7 @@ class Poller:
                         self._api,
                         self._query_plan,
                         self._current_context,
+                        self._unsupported_at_commands,
                     )
                     _LOGGER.debug(
                         "poll_once: query plan done — any_success=%s, keys=%s",
@@ -361,6 +363,7 @@ def _apply_can_context(
     transport: TransportBase,
     context: CanContext,
     api: Connection,
+    unsupported: set[str] | None = None,
 ) -> None:
     """Send the AT commands needed to transition to ``context``.
 
@@ -383,8 +386,18 @@ def _apply_can_context(
     if context.extra_init:
         for cmd in context.extra_init.split(";"):
             cmd = cmd.strip()
-            if cmd:
-                _send_at(transport, cmd)
+            if not cmd:
+                continue
+            if unsupported and cmd in unsupported:
+                _LOGGER.debug("AT %s skipped (unsupported by adapter)", cmd)
+                continue
+            resp = _send_at(transport, cmd)
+            if b"?" in resp and unsupported is not None:
+                _LOGGER.warning(
+                    "Adapter does not support %s — skipping on future polls",
+                    cmd,
+                )
+                unsupported.add(cmd)
 
 
 def _reset_to_default_addressing(transport: TransportBase, api: Connection) -> None:
@@ -440,20 +453,24 @@ def _detect_protocol(api: Connection) -> str | None:
     return extract_protocol_number(resp.raw)
 
 
-def _send_at(transport: TransportBase, command: str) -> None:
-    """Write a single AT command + CR, then drain the response."""
+def _send_at(transport: TransportBase, command: str) -> bytes:
+    """Write a single AT command + CR, then drain the response. Returns raw response."""
     try:
         transport.write_bytes(command.encode() + b"\r")
         resp = transport.read_bytes()
-        _LOGGER.debug("AT %s -> %s", command, resp.decode(errors="ignore").strip())
     except (OSError, TimeoutError, TransportError) as err:
         _LOGGER.debug("AT command %r failed: %s", command, err)
+        return b""
+    else:
+        _LOGGER.debug("AT %s -> %s", command, resp.decode(errors="ignore").strip())
+        return resp
 
 
 def _run_query_plan(
     api: Connection,
     plan: list[tuple[CanContext, list[QueryItem]]],
     current_context: CanContext | None,
+    unsupported: set[str] | None = None,
 ) -> tuple[dict[str, Any], bool, CanContext | None]:
     """Walk the query plan, switching CAN context only between groups.
 
@@ -475,7 +492,7 @@ def _run_query_plan(
                 context.filter,
                 context.extra_init,
             )
-            _apply_can_context(api.transport, context, api)
+            _apply_can_context(api.transport, context, api, unsupported)
             ctx = context
 
         for item in items:
