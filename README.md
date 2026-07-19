@@ -4,7 +4,7 @@
 
 A Python library for reading vehicle diagnostic data from ELM327 Bluetooth Low Energy (BLE) OBD-II adapters.
 
-This library is used by the [ELM327 OBD-II BLE integration in Home Assistant](https://www.home-assistant.io/integrations/elm327_obdii_ble/).
+This library is used by the [ELM327 OBD-II BLE integration in Home Assistant](https://github.com/tronikos/elm327_obdii_ble).
 
 ## Features
 
