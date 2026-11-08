@@ -164,6 +164,7 @@ class TransportBLE(TransportBase):
                         )
 
         if not write_char or not read_char:
+            await self.async_close()
             raise TransportError(
                 "Could not locate compatible Read/Write GATT characteristics. "
                 "Verify the adapter UUIDs or try a different BLE serial profile."
@@ -173,9 +174,13 @@ class TransportBLE(TransportBase):
         self.config["uuid_write"] = write_char
         self.config["uuid_read"] = read_char
 
-        await self._ble_conn.start_notify(
-            self.config["uuid_read"], self._notify_callback
-        )
+        try:
+            await self._ble_conn.start_notify(
+                self.config["uuid_read"], self._notify_callback
+            )
+        except BaseException:
+            await self.async_close()
+            raise
 
     async def async_close(self) -> None:
         """Gracefully disconnect from BLE peripheral."""

@@ -258,3 +258,40 @@ class TestExtractCleanPayload:
         """Error tokens are filtered before clean payload extraction."""
         raw = b"SEARCHING...\r7E8 04 41 0C 1A F8\r>"
         assert extract_clean_payload(raw, "01") == [0x1A, 0xF8]
+
+    def test_negative_response_returns_empty(self) -> None:
+        """UDS negative response (service 0x7F at byte 1) returns empty list."""
+        raw = b"7E8 03 7F 22 31\r>"
+        assert extract_clean_payload(raw, "22") == []
+
+    def test_positive_response_with_0x7f_first_data_byte(self) -> None:
+        """A positive response whose first payload byte is 0x7F is preserved."""
+        raw = b"7E8 04 62 02 8C 7F\r>"
+        assert extract_clean_payload(raw, "22") == [0x7F]
+
+    def test_mode22_multiframe_isotp(self) -> None:
+        """Multi-frame ISO 15765-2 response strips FF/CF PCI and trailing padding."""
+        # Total length 0x013 = 19 bytes: 62 1E 32 + 16 data bytes, plus 1 padding byte (0xAA)
+        raw = (
+            b"7ED 10 13 62 1E 32 00 1A 2B\r"
+            b"7ED 21 3C 4D 5E 6F 70 81 92\r"
+            b"7ED 22 A3 B4 C5 D6 E7 F8 AA\r>"
+        )
+        assert extract_clean_payload(raw, "22") == [
+            0x00,
+            0x1A,
+            0x2B,
+            0x3C,
+            0x4D,
+            0x5E,
+            0x6F,
+            0x70,
+            0x81,
+            0x92,
+            0xA3,
+            0xB4,
+            0xC5,
+            0xD6,
+            0xE7,
+            0xF8,
+        ]

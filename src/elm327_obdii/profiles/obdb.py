@@ -82,7 +82,6 @@ OBDB_SUGGESTED_METRIC_MAP: dict[str, str] = {
     "batteryTemperature": "temperature",
     "ambientTemperature": "temperature",
     "engineCoolantTemperature": "temperature",
-    "engineSpeed": "speed",
     "power": "power",
     "energy": "energy",
 }

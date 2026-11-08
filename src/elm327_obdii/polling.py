@@ -146,7 +146,7 @@ class Poller:
             )
             if self._api is None:
                 return False
-            self._current_context = None
+            self._current_context = CanContext()
             return True
 
     def disconnect(self) -> None:

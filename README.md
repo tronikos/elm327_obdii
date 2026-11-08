@@ -34,7 +34,14 @@ pip install elm327_obdii
 
 ```python
 import asyncio
-from elm327_obdii import Poller, PollerConfig, ProfileConfig
+import bleak
+from elm327_obdii import (
+    DEFAULT_READ_CHAR_UUID,
+    DEFAULT_WRITE_CHAR_UUID,
+    Poller,
+    PollerConfig,
+    ProfileConfig,
+)
 
 
 async def main():
@@ -47,13 +54,20 @@ async def main():
         grace_seconds=30,
     )
     poller = Poller(config)
+    loop = asyncio.get_running_loop()
 
     # Connect to the adapter (provide a BLEDevice from bleak)
     ble_device = await bleak.BleakScanner.find_device_by_address("AA:BB:CC:DD:EE:FF")
-    poller.connect(ble_device, asyncio.get_event_loop(), uuid_write, uuid_read)
+    await asyncio.to_thread(
+        poller.connect,
+        ble_device,
+        loop,
+        DEFAULT_WRITE_CHAR_UUID,
+        DEFAULT_READ_CHAR_UUID,
+    )
 
     # Poll once
-    result = poller.poll_once()
+    result = await asyncio.to_thread(poller.poll_once)
     print(f"State: {result.state}, Voltage: {result.voltage}")
     print(f"Data: {result.data}")
 

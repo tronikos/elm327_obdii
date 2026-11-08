@@ -45,28 +45,9 @@ _HEX_RE = re.compile(r"^[0-9A-Fa-f]+$")
 _VOLTAGE_RE = re.compile(r"(?<!\d)(\d{1,2}\.\d{1,3})(?!\d)")
 
 
-def extract_dirty_array(raw_response: bytes) -> list[int]:
-    """Parse an ELM327 raw text response into a flat list of hex bytes.
-
-    This is the "dirty array" that custom PID formulas (WiCAN, Torque,
-    RealDash notation) are written against. It includes PCI bytes,
-    mode echoes, and PID echoes at the positions the formula authors
-    see when looking at raw ELM327 terminal output.
-
-    Handles:
-      - Space-delimited packets (AT S1, default): "7E8 05 41 0C 1A F8"
-      - Contiguous hex strings (AT S0, spaces off): "7E805410C1AF8"
-      - 11-bit CAN headers (3 hex chars): "7E8"
-      - 29-bit CAN headers (8 hex chars): "18DAF110"
-      - Multi-line responses (one CAN frame per line)
-      - ``>`` prompt character stripping
-      - Error token filtering (DATA, ERROR, STOPPED, UNABLE, BUS)
-
-    The CAN header token at the start of each line is skipped - only
-    the data bytes (PCI + mode echo + PID echo + payload) are included
-    in the returned array.
-    """
-    dirty_array: list[int] = []
+def _extract_frames(raw_response: bytes) -> list[list[int]]:
+    """Parse an ELM327 raw text response into per-frame byte lists (header stripped)."""
+    frames: list[list[int]] = []
     try:
         raw_str = raw_response.decode("utf-8", errors="ignore")
         lines = [
@@ -116,23 +97,52 @@ def extract_dirty_array(raw_response: bytes) -> list[int]:
 
             if len(parts) > 1:
                 # First word is the CAN header (e.g., '7E8'). Skip it -
-                # the dirty array is data bytes only (PCI + echoes + payload).
+                # the frame is data bytes only (PCI + echoes + payload).
+                frame: list[int] = []
                 for part in parts[1:]:
                     try:
-                        dirty_array.append(int(part, 16))
+                        frame.append(int(part, 16))
                     except ValueError:
                         _LOGGER.debug("Non-hex token in frame, skipping: %r", part)
+                if frame:
+                    frames.append(frame)
 
     except Exception as err:  # noqa: BLE001
-        _LOGGER.debug("Could not extract dirty array: %s", err)
-    return dirty_array
+        _LOGGER.debug("Could not extract frames: %s", err)
+    return frames
+
+
+def extract_dirty_array(raw_response: bytes) -> list[int]:
+    """Parse an ELM327 raw text response into a flat list of hex bytes.
+
+    This is the "dirty array" that custom PID formulas (WiCAN, Torque,
+    RealDash notation) are written against. It includes PCI bytes,
+    mode echoes, and PID echoes at the positions the formula authors
+    see when looking at raw ELM327 terminal output.
+
+    Handles:
+      - Space-delimited packets (AT S1, default): "7E8 05 41 0C 1A F8"
+      - Contiguous hex strings (AT S0, spaces off): "7E805410C1AF8"
+      - 11-bit CAN headers (3 hex chars): "7E8"
+      - 29-bit CAN headers (8 hex chars): "18DAF110"
+      - Multi-line responses (one CAN frame per line)
+      - ``>`` prompt character stripping
+      - Error token filtering (DATA, ERROR, STOPPED, UNABLE, BUS)
+
+    The CAN header token at the start of each line is skipped - only
+    the data bytes (PCI + mode echo + PID echo + payload) are included
+    in the returned array.
+    """
+    return [b for frame in _extract_frames(raw_response) for b in frame]
 
 
 def extract_clean_payload(raw_response: bytes, mode: str) -> list[int]:
     """Parse an ELM327 raw response into the clean payload (data bytes only).
 
-    Strips the CAN header, PCI byte, mode echo, and PID echo — leaving
-    only the data bytes that ``fmt.bix`` offsets are measured against.
+    Strips the CAN header, PCI byte (including ISO 15765-2 First Frame
+    and Consecutive Frame PCI bytes for multi-frame responses), mode echo,
+    and PID echo — leaving only the data bytes that ``fmt.bix`` offsets
+    are measured against.
 
     For a Mode 01 response ``7E8 04 41 0C 1A F8``:
         dirty array = ``[0x04, 0x41, 0x0C, 0x1A, 0xF8]``
@@ -148,20 +158,44 @@ def extract_clean_payload(raw_response: bytes, mode: str) -> list[int]:
         Mode 22: 2-byte PID echo → strip 4 bytes (PCI + mode + PIDhi + PIDlo)
         Other:   strip 3 bytes (conservative default)
 
+    Returns an empty list on UDS negative responses (service ``0x7F``).
     Falls back to the dirty array (minus the PCI byte) if the mode
     echo doesn't match — degrades gracefully on malformed responses.
     """
-    dirty = extract_dirty_array(raw_response)
-    if not dirty:
+    frames = _extract_frames(raw_response)
+    if not frames:
         return []
 
-    # Expect the second byte to be the mode echo (0x40 + mode_int).
+    # Expect the mode echo byte to be (0x40 + mode_int).
     try:
         mode_int = int(mode, 16)
     except ValueError:
         mode_int = 0
 
     expected_echo = 0x40 + mode_int
+
+    # Reassemble ISO 15765-2 multi-frame responses (First Frame PCI 0x10..0x1F
+    # with 12-bit length in bytes 0..1 and mode echo at byte 2, followed by
+    # Consecutive Frames with PCI 0x20..0x2F at byte 0).
+    first = frames[0]
+    if (
+        len(first) >= 3
+        and 0x10 <= first[0] <= 0x1F
+        and (len(frames) > 1 or first[2] == expected_echo)
+    ):
+        total_len = ((first[0] & 0x0F) << 8) | first[1]
+        reassembled: list[int] = list(first[2:])
+        for cf in frames[1:]:
+            if cf and 0x20 <= cf[0] <= 0x2F:
+                reassembled.extend(cf[1:])
+            else:
+                reassembled.extend(cf)
+        if total_len > 0:
+            reassembled = reassembled[:total_len]
+        dirty = [total_len, *reassembled]
+    else:
+        dirty = [b for frame in frames for b in frame]
+
     if len(dirty) >= 2 and dirty[1] == expected_echo:
         if mode_int in (0x01, 0x02, 0x09):
             # 1-byte PID echo
@@ -171,6 +205,11 @@ def extract_clean_payload(raw_response: bytes, mode: str) -> list[int]:
             return dirty[4:] if len(dirty) > 4 else []
         # Unknown mode — strip PCI + mode + 1 PID byte as a guess
         return dirty[3:] if len(dirty) > 3 else []
+
+    if len(dirty) >= 2 and dirty[1] == 0x7F:
+        nrc = dirty[3] if len(dirty) > 3 else 0
+        _LOGGER.debug("Negative response (NRC=0x%02X), skipping", nrc)
+        return []
 
     # Mode echo mismatch — return everything after the PCI byte.
     return dirty[1:] if len(dirty) > 1 else []

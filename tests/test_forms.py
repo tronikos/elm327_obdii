@@ -62,6 +62,12 @@ class TestParseFormulaString:
         assert parse_formula_string("B(0) ** 2") is None
         assert parse_formula_string("(B(0)-40)*1.8+32") is None
 
+    def test_invalid_range_or_zero_div_returns_none(self) -> None:
+        """Reversed byte range, zero division, or bit > 7 returns None."""
+        assert parse_formula_string("B(5, 4)") is None
+        assert parse_formula_string("B(0)/0") is None
+        assert parse_formula_string("BIT(2, 8)") is None
+
     def test_whitespace_normalized(self) -> None:
         """Whitespace is stripped before matching."""
         assert parse_formula_string("  B(4) / 2.55  ") == {
@@ -147,12 +153,16 @@ class TestFormDefaults:
             mode="22",
             query="028C",
             fmt={"bix": 32, "len": 16, "div": 4, "sign": True},
+            min_value=-40.0,
+            max_value=215.0,
         )
         defaults = pid_to_form_defaults(pid)
         assert defaults["bix"] == 32
         assert defaults["len"] == 16
         assert defaults["div"] == 4
         assert defaults["sign"] is True
+        assert defaults["min_value"] == -40.0
+        assert defaults["max_value"] == 215.0
 
     def test_user_input_to_form_defaults(self) -> None:
         """user_input_to_form_defaults normalizes input types."""
@@ -245,8 +255,8 @@ class TestFormInputToFmtFromHybrid:
         )
         assert fmt == {"bix": 32, "len": 16, "div": 4.0}
 
-    def test_unparseable_string_falls_back(self) -> None:
-        """When formula string doesn't parse, structured fields are used."""
+    def test_unparseable_string_returns_none(self) -> None:
+        """When formula string is non-empty and invalid, None is returned."""
         fmt = form_input_to_fmt_from_hybrid(
             {
                 "formula": "B(0) + B(1)",
@@ -254,7 +264,21 @@ class TestFormInputToFmtFromHybrid:
                 "len": 8,
             }
         )
-        assert fmt == {"bix": 0, "len": 8}
+        assert fmt is None
+
+    def test_existing_fmt_structured_edits_preserved(self) -> None:
+        """When formula matches existing_fmt, structured field edits win."""
+        existing = {"bix": 32, "len": 8, "div": 2.55}
+        fmt = form_input_to_fmt_from_hybrid(
+            {
+                "formula": "B(4)/2.55",
+                "bix": 16,
+                "len": 8,
+                "div": 4,
+            },
+            existing_fmt=existing,
+        )
+        assert fmt == {"bix": 16, "len": 8, "div": 4.0}
 
     def test_string_with_min_max_merged(self) -> None:
         """min/max from structured fields merge into parsed fmt."""

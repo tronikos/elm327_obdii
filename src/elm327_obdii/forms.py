@@ -80,6 +80,8 @@ def pid_to_form_defaults(pid: CustomPid) -> dict[str, Any]:
         "unit": pid.unit or "",
         "device_class": pid.device_class or "",
         "state_class": pid.state_class or "",
+        "min_value": pid.min_value,
+        "max_value": pid.max_value,
         "expected_bytes": pid.expected_bytes or 0,
     }
 
@@ -107,12 +109,20 @@ def empty_form_defaults() -> dict[str, Any]:
         "unit": "",
         "device_class": "",
         "state_class": "",
+        "min_value": None,
+        "max_value": None,
         "expected_bytes": 0,
     }
 
 
 def user_input_to_form_defaults(user_input: dict[str, Any]) -> dict[str, Any]:
     """Build form defaults from submitted user input (preserves on validation error)."""
+    bix_val = user_input.get("bix")
+    len_val = user_input.get("len")
+    mul_val = as_float(user_input.get("mul"))
+    div_val = as_float(user_input.get("div"))
+    add_val = as_float(user_input.get("add"))
+    exp_val = user_input.get("expected_bytes")
     return {
         "pid_name": user_input.get("pid_name", ""),
         "mode": (user_input.get("mode") or "").strip().upper(),
@@ -121,11 +131,11 @@ def user_input_to_form_defaults(user_input: dict[str, Any]) -> dict[str, Any]:
         "can_filter": (user_input.get("can_filter") or "").strip().upper(),
         "init_extra": user_input.get("init_extra", ""),
         "formula": (user_input.get("formula") or "").strip(),
-        "bix": int(user_input.get("bix") or 0),
-        "len": int(user_input.get("len") or 8),
-        "mul": as_float(user_input.get("mul")) or 1,
-        "div": as_float(user_input.get("div")) or 1,
-        "add": as_float(user_input.get("add")) or 0,
+        "bix": int(bix_val) if bix_val not in (None, "") else 0,
+        "len": int(len_val) if len_val not in (None, "") else 8,
+        "mul": mul_val if mul_val is not None else 1,
+        "div": div_val if div_val is not None else 1,
+        "add": add_val if add_val is not None else 0,
         "sign": bool(user_input.get("sign")),
         "blsb": bool(user_input.get("blsb")),
         "min": as_float(user_input.get("min")),
@@ -134,7 +144,9 @@ def user_input_to_form_defaults(user_input: dict[str, Any]) -> dict[str, Any]:
         "unit": user_input.get("unit", ""),
         "device_class": user_input.get("device_class", ""),
         "state_class": user_input.get("state_class", ""),
-        "expected_bytes": int(user_input.get("expected_bytes") or 0),
+        "min_value": as_float(user_input.get("min_value")),
+        "max_value": as_float(user_input.get("max_value")),
+        "expected_bytes": int(exp_val) if exp_val not in (None, "") else 0,
     }
 
 
@@ -219,6 +231,8 @@ def parse_formula_string(source: str) -> dict[str, Any] | None:
     if m:
         byte_idx = int(m.group(1))
         bit_idx = int(m.group(2))
+        if bit_idx > 7:
+            return None
         return {"bix": byte_idx * 8 + bit_idx, "len": 1}
 
     m = _RE_FORMULA_SINGLE.match(s)
@@ -228,16 +242,25 @@ def parse_formula_string(source: str) -> dict[str, Any] | None:
     typ = m.group("type")
     a = int(m.group("a"))
     b = int(m.group("b")) if m.group("b") else a
+    if b < a or (b - a + 1) * 8 > 64:
+        return None
     fmt: dict[str, Any] = {
         "bix": a * 8,
         "len": (b - a + 1) * 8,
     }
     if typ == "S":
         fmt["sign"] = True
-    if m.group("op") == "*":
-        fmt["mul"] = float(m.group("val"))
-    elif m.group("op") == "/":
-        fmt["div"] = float(m.group("val"))
+    if m.group("op"):
+        try:
+            val = float(m.group("val"))
+        except ValueError:
+            return None
+        if m.group("op") == "*":
+            fmt["mul"] = val
+        elif m.group("op") == "/":
+            if val == 0:
+                return None
+            fmt["div"] = val
     return fmt
 
 
@@ -285,12 +308,17 @@ def fmt_to_string(fmt: dict[str, Any]) -> str:
     bix = fmt.get("bix", 0)
     length = fmt.get("len", 0)
 
-    # Must be byte-aligned.
-    if bix % 8 != 0 or length % 8 != 0:
+    # Must be byte-aligned and positive length.
+    if length <= 0 or bix % 8 != 0 or length % 8 != 0:
         return ""
 
     # No advanced features.
-    if fmt.get("blsb") or fmt.get("map") or fmt.get("nullmin") or fmt.get("nullmax"):
+    if (
+        fmt.get("blsb")
+        or fmt.get("map")
+        or fmt.get("nullmin") is not None
+        or fmt.get("nullmax") is not None
+    ):
         return ""
 
     byte_start = bix // 8
@@ -321,34 +349,49 @@ def fmt_to_string(fmt: dict[str, Any]) -> str:
     return core + suffix
 
 
-def form_input_to_fmt_from_hybrid(user_input: dict[str, Any]) -> dict[str, Any] | None:
+def form_input_to_fmt_from_hybrid(
+    user_input: dict[str, Any],
+    existing_fmt: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Build a fmt dict from the hybrid form (string + structured fields).
 
     Priority:
-      1. If the user filled in the ``formula`` string field and it parses,
-         use the parsed fmt (ignores structured fields).
-      2. Otherwise, build the fmt from the structured fields
+      1. If the user filled in the ``formula`` string field:
+         - If it does not parse as a valid shorthand formula, return ``None``.
+         - If ``existing_fmt`` is provided and ``formula`` matches the
+           untouched pre-filled formula string of ``existing_fmt``, fall
+           through to the structured fields so edits made in the structured
+           section are preserved.
+         - Otherwise, use the parsed fmt and merge any structured fields
+           that shorthand notation cannot express (``add``, ``blsb``,
+           ``min``, ``max``, ``map_text``).
+      2. If ``formula`` is empty, build the fmt from the structured fields
          (bix, len, mul, div, add, sign, blsb, min, max, map_text).
-      3. If neither produces a valid fmt, return None.
-
-    Returns None on invalid input — the caller shows an error.
+      3. Return ``None`` on invalid input so the caller shows an error.
     """
     formula_str = (user_input.get("formula") or "").strip()
     if formula_str:
         parsed = parse_formula_string(formula_str)
-        if parsed is not None:
-            # Merge min/max from structured fields if provided.
+        if parsed is None:
+            return None
+        if existing_fmt is None or formula_str != fmt_to_string(existing_fmt):
+            add_val = as_float(user_input.get("add"))
+            if add_val is not None and add_val != 0:
+                parsed["add"] = add_val
+            if user_input.get("blsb"):
+                parsed["blsb"] = True
             min_val = as_float(user_input.get("min"))
             max_val = as_float(user_input.get("max"))
             if min_val is not None:
                 parsed["min"] = min_val
             if max_val is not None:
                 parsed["max"] = max_val
+            map_text = (user_input.get("map_text") or "").strip()
+            if map_text:
+                mapping = _parse_map_text(map_text)
+                if mapping:
+                    parsed["map"] = mapping
             return parsed
-        # String was provided but didn't parse — fall through to structured.
-        # If structured fields are also empty, return None to signal error.
-        if not user_input.get("bix") and not user_input.get("len"):
-            return None
 
     # Build from structured fields.
     try:

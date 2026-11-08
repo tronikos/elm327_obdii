@@ -287,3 +287,45 @@ class TestCustomQueryItemExecute:
             context=CanContext(),
         )
         assert item.key == "t"
+
+    def test_returns_value_when_first_payload_byte_is_0x7f(self) -> None:
+        """A positive response starting with payload byte 0x7F (127) is not dropped."""
+        conn = MagicMock()
+        resp = MagicMock()
+        resp.raw = b"7E8 04 62 02 8C 7F\r>"
+        conn.query.return_value = resp
+        pid = CustomPid(
+            id="t",
+            name="Test",
+            mode="22",
+            query="028C",
+            fmt={"bix": 0, "len": 8},
+        )
+        item = CustomQueryItem(
+            pid=pid,
+            command=MagicMock(),
+            evaluator=make_fmt_evaluator({"bix": 0, "len": 8}),
+            context=CanContext(),
+        )
+        assert item.execute(conn) == 127.0
+
+    def test_returns_none_on_uds_negative_response(self) -> None:
+        """A UDS negative response (7F 22 31) returns None."""
+        conn = MagicMock()
+        resp = MagicMock()
+        resp.raw = b"7E8 03 7F 22 31\r>"
+        conn.query.return_value = resp
+        pid = CustomPid(
+            id="t",
+            name="Test",
+            mode="22",
+            query="028C",
+            fmt={"bix": 0, "len": 8},
+        )
+        item = CustomQueryItem(
+            pid=pid,
+            command=MagicMock(),
+            evaluator=make_fmt_evaluator({"bix": 0, "len": 8}),
+            context=CanContext(),
+        )
+        assert item.execute(conn) is None

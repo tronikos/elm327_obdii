@@ -105,10 +105,13 @@ class TestProposeDeviceClass:
         assert propose_device_class(cmd) == "voltage"
 
     def test_speed_pid(self) -> None:
-        """Speed PIDs map to 'speed'."""
+        """Speed PIDs map to 'speed', but ENGINE_SPEED (rpm) does not."""
         cmd = get_standard_command("VEHICLE_SPEED")
         assert cmd is not None
         assert propose_device_class(cmd) == "speed"
+        rpm_cmd = get_standard_command("ENGINE_SPEED")
+        assert rpm_cmd is not None
+        assert propose_device_class(rpm_cmd) is None
 
     def test_pressure_pid(self) -> None:
         """Pressure PIDs map to 'pressure'."""
@@ -174,10 +177,10 @@ class TestProposeIcon:
         assert propose_icon(cmd) == "mdi:speedometer"
 
     def test_engine_speed_icon(self) -> None:
-        """ENGINE_SPEED contains 'SPEED' so it gets the speedometer icon."""
+        """ENGINE_SPEED gets the engine icon."""
         cmd = get_standard_command("ENGINE_SPEED")
         assert cmd is not None
-        assert propose_icon(cmd) == "mdi:speedometer"
+        assert propose_icon(cmd) == "mdi:engine"
 
     def test_voltage_icon(self) -> None:
         """Voltage PIDs get a flash icon."""

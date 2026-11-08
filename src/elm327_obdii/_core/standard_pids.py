@@ -74,10 +74,10 @@ def propose_icon(command: Command[Any]) -> str | None:
         return "mdi:thermometer"
     if "VOLT" in name or units == "v":
         return "mdi:flash"
-    if "SPEED" in name:
-        return "mdi:speedometer"
     if "RPM" in name or name == "ENGINE_SPEED":
         return "mdi:engine"
+    if "SPEED" in name:
+        return "mdi:speedometer"
     if "FUEL" in name or "LEVEL" in name:
         return "mdi:gas-station"
     if "LOAD" in name:
@@ -109,7 +109,7 @@ def propose_device_class(command: Command[Any]) -> str | None:
         return "voltage"
     if "PRESSURE" in name or units in ("kpa", "bar"):
         return "pressure"
-    if "SPEED" in name or units in ("km/h", "mph"):
+    if ("SPEED" in name and units != "rpm") or units in ("km/h", "mph"):
         return "speed"
     if "FUEL" in name and "LEVEL" in name:
         return "battery"
