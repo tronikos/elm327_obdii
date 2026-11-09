@@ -181,7 +181,10 @@ def extract_clean_payload(raw_response: bytes, mode: str) -> list[int]:
     if (
         len(first) >= 3
         and 0x10 <= first[0] <= 0x1F
-        and (len(frames) > 1 or first[2] == expected_echo)
+        and (
+            (len(frames) > 1 and bool(frames[1]) and 0x20 <= frames[1][0] <= 0x2F)
+            or (first[1] != expected_echo and first[2] == expected_echo)
+        )
     ):
         total_len = ((first[0] & 0x0F) << 8) | first[1]
         reassembled: list[int] = list(first[2:])

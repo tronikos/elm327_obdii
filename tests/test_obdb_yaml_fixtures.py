@@ -208,7 +208,13 @@ class TestEgolfYamlTestCases:
                     continue
 
                 result = evaluate_fmt(clean_payload, pid.fmt)
-                if result is None:
+                if expected is None:
+                    if result is not None:
+                        failures.append(
+                            f"{signal_id}: got {result}, expected None "
+                            f"(clean={clean_payload}, fmt={pid.fmt})"
+                        )
+                elif result is None:
                     failures.append(
                         f"{signal_id}: evaluator returned None "
                         f"(clean={clean_payload}, fmt={pid.fmt})"

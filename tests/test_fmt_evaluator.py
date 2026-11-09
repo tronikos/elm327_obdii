@@ -295,7 +295,7 @@ class TestEvaluateFmtNullSentinels:
         assert result is None
 
     def test_nullmin_boundary_inclusive(self) -> None:
-        """Raw == nullmin is NOT excluded (only strictly less than)."""
+        """Scaled value == nullmin is excluded as a sentinel (returns None)."""
         result = evaluate_fmt(
             [0x0A],
             {
@@ -304,7 +304,24 @@ class TestEvaluateFmtNullSentinels:
                 "nullmin": 10,
             },
         )
-        assert result == 10.0
+        assert result is None
+        # Just above nullmin is kept
+        assert evaluate_fmt([0x0B], {"bix": 0, "len": 8, "nullmin": 10}) == 11.0
+
+    def test_nullmin_scaled_with_offset(self) -> None:
+        """nullmin/nullmax are evaluated in scaled units (after mul/div/add)."""
+        fmt = {
+            "bix": 0,
+            "len": 8,
+            "add": -50,
+            "min": -50,
+            "max": 205,
+            "nullmin": -50,
+            "nullmax": 205,
+        }
+        assert evaluate_fmt([0x00], fmt) is None
+        assert evaluate_fmt([0xFF], fmt) is None
+        assert evaluate_fmt([0x46], fmt) == 20.0
 
 
 class TestEvaluateFmtEdgeCases:

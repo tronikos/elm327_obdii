@@ -127,14 +127,6 @@ def evaluate_fmt(payload: list[int], fmt: dict[str, Any]) -> float | str | None:
     if fmt.get("sign") and (raw >> (length - 1)) & 1:
         raw -= 1 << length
 
-    # Null-range sentinels (OBDb fmt nullmin/nullmax).
-    nullmin = fmt.get("nullmin")
-    if nullmin is not None and raw < nullmin:
-        return None
-    nullmax = fmt.get("nullmax")
-    if nullmax is not None and raw > nullmax:
-        return None
-
     # Enumeration: return the mapped string, or None if not in map.
     mapping = fmt.get("map")
     if mapping is not None:
@@ -150,6 +142,15 @@ def evaluate_fmt(payload: list[int], fmt: dict[str, Any]) -> float | str | None:
     try:
         result = raw * mul / div + add
     except (TypeError, ZeroDivisionError, OverflowError):
+        return None
+
+    # Null-range sentinels (OBDb fmt nullmin/nullmax are inclusive bounds
+    # in scaled units — e.g. 0x00 or 0xFF "not available" byte values).
+    nullmin = fmt.get("nullmin")
+    if nullmin is not None and result <= nullmin:
+        return None
+    nullmax = fmt.get("nullmax")
+    if nullmax is not None and result >= nullmax:
         return None
 
     # Clamping.

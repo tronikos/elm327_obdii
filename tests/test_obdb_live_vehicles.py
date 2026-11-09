@@ -211,7 +211,12 @@ def test_obdb_vehicle_yaml_test_cases(make: str, model: str) -> None:
                     continue  # signal not in this vehicle's profile
                 result = evaluate_fmt(clean, pid.fmt)
                 checked += 1
-                if result is None:
+                if expected is None:
+                    if result is not None:
+                        failures.append(
+                            f"{filename} {signal_id}: {result} != None (fmt={pid.fmt})"
+                        )
+                elif result is None:
                     failures.append(f"{filename} {signal_id}: None (fmt={pid.fmt})")
                 elif isinstance(result, str):
                     if result != str(expected):
